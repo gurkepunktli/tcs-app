@@ -70,6 +70,11 @@ function getLocation() {
             (error) => {
                 console.error('Standort-Fehler:', error);
                 coordinates = null;
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 0,
+                timeout: 10000
             }
         );
     }
@@ -119,6 +124,24 @@ async function uploadPhoto() {
     if (!capturedImage) {
         alert('Kein Foto vorhanden');
         return;
+    }
+
+    // Check GPS accuracy
+    if (coordinates && coordinates.accuracy > 20) {
+        const proceed = confirm(
+            `GPS-Genauigkeit ist ${Math.round(coordinates.accuracy)}m (sollte ≤20m sein).\n\n` +
+            `Möchten Sie trotzdem fortfahren?`
+        );
+        if (!proceed) {
+            return;
+        }
+    }
+
+    if (!coordinates) {
+        const proceed = confirm('Kein GPS-Standort verfügbar. Trotzdem fortfahren?');
+        if (!proceed) {
+            return;
+        }
     }
 
     // Show loading
