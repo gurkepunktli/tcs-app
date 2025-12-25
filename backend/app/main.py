@@ -159,7 +159,6 @@ def get_paddle_ocr():
         _paddle_ocr = PaddleOCR(
             use_angle_cls=False,
             lang='en',
-            use_gpu=False,
             show_log=False
         )
     return _paddle_ocr
