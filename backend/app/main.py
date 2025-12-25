@@ -57,15 +57,15 @@ async def process_image(
         contents = await image.read()
         img = Image.open(io.BytesIO(contents))
 
-        # Try EasyOCR first (best for LED displays, free and local)
+        # Try PaddleOCR first (best for LED displays, fast and local)
         prices = []
         text = ""
 
         try:
-            prices, text = easyocr_extract_prices(contents)
-            print(f"EasyOCR extraction successful: {prices}")
-        except Exception as easyocr_error:
-            print(f"EasyOCR failed: {easyocr_error}, falling back to Tesseract")
+            prices, text = paddleocr_extract_prices(contents)
+            print(f"PaddleOCR extraction successful: {prices}")
+        except Exception as paddle_error:
+            print(f"PaddleOCR failed: {paddle_error}, falling back to Tesseract")
 
             # Fallback to Tesseract OCR
             from PIL import ImageEnhance, ImageFilter
@@ -147,83 +147,79 @@ async def process_image(
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
 
-# Global EasyOCR reader (initialized once to avoid reloading models)
-_easyocr_reader = None
+# Global PaddleOCR instance (initialized once to avoid reloading models)
+_paddle_ocr = None
 
-def get_easyocr_reader():
-    """Lazy load EasyOCR reader (singleton pattern)"""
-    global _easyocr_reader
-    if _easyocr_reader is None:
-        import easyocr
-        # Use English for digits, German/French/Italian for text labels
-        _easyocr_reader = easyocr.Reader(['en'], gpu=False)
-    return _easyocr_reader
+def get_paddle_ocr():
+    """Lazy load PaddleOCR instance (singleton pattern)"""
+    global _paddle_ocr
+    if _paddle_ocr is None:
+        from paddleocr import PaddleOCR
+        # Initialize with English model, CPU mode, disable angle classification for speed
+        _paddle_ocr = PaddleOCR(
+            use_angle_cls=False,
+            lang='en',
+            use_gpu=False,
+            show_log=False
+        )
+    return _paddle_ocr
 
 
-def easyocr_extract_prices(image_bytes: bytes) -> tuple[List[PriceData], str]:
+def paddleocr_extract_prices(image_bytes: bytes) -> tuple[List[PriceData], str]:
     """
-    Use EasyOCR to extract fuel prices from LED displays.
+    Use PaddleOCR to extract fuel prices from LED displays.
     Returns (prices, raw_text) tuple.
     """
     import numpy as np
+    import cv2
 
-    # Load image
-    img = Image.open(io.BytesIO(image_bytes))
+    # Load image with OpenCV
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    # Convert to RGB if needed
-    if img.mode != 'RGB':
-        img = img.convert('RGB')
+    # Get PaddleOCR instance
+    ocr = get_paddle_ocr()
 
-    # Convert PIL Image to numpy array for EasyOCR
-    img_array = np.array(img)
+    # Perform OCR
+    results = ocr.ocr(img, cls=False)
 
-    # Get EasyOCR reader
-    reader = get_easyocr_reader()
-
-    # Perform OCR with allowlist for digits and decimal point
-    results = reader.readtext(
-        img_array,
-        allowlist='0123456789.',
-        detail=1,
-        paragraph=False
-    )
+    if not results or not results[0]:
+        raise ValueError("PaddleOCR found no text")
 
     # Extract detected text and bounding boxes
     detected_texts = []
-    for bbox, text, confidence in results:
-        # Only keep high confidence detections
-        if confidence > 0.3:
+    for line in results[0]:
+        bbox, (text, confidence) = line
+        # Only keep detections with digits
+        if any(c.isdigit() for c in text) and confidence > 0.5:
             detected_texts.append((text, bbox, confidence))
-            print(f"EasyOCR detected: '{text}' (confidence: {confidence:.2f})")
+            print(f"PaddleOCR detected: '{text}' (confidence: {confidence:.2f})")
 
     # Combine all detected text
     raw_text = ' '.join([text for text, _, _ in detected_texts])
 
+    # Filter to only digits and dots
+    filtered_texts = []
+    for text, bbox, conf in detected_texts:
+        # Remove non-digit characters except dots
+        cleaned = ''.join(c for c in text if c.isdigit() or c == '.')
+        if cleaned:
+            filtered_texts.append((cleaned, bbox, conf))
+
     # Extract price-like patterns
     price_pattern = r'(\d{1,2}\.\d{1,3})'
-    found_prices = re.findall(price_pattern, raw_text)
-
-    # Convert to floats and validate
-    valid_prices = []
-    for price_str in found_prices:
-        try:
-            price = float(price_str)
-            if 1.0 <= price <= 3.0:  # Reasonable CHF price range
-                valid_prices.append(price)
-        except ValueError:
-            continue
-
-    # Sort by vertical position (top to bottom)
-    # Use bbox center Y coordinate for sorting
     prices_with_pos = []
-    for text, bbox, conf in detected_texts:
+
+    for text, bbox, conf in filtered_texts:
         for price_str in re.findall(price_pattern, text):
             try:
                 price = float(price_str)
-                if 1.0 <= price <= 3.0:
+                if 1.0 <= price <= 3.0:  # Reasonable CHF price range
                     # Calculate vertical center of bounding box
-                    y_center = (bbox[0][1] + bbox[2][1]) / 2
+                    y_coords = [point[1] for point in bbox]
+                    y_center = sum(y_coords) / len(y_coords)
                     prices_with_pos.append((price, y_center))
+                    print(f"Valid price found: {price} at Y={y_center}")
             except (ValueError, IndexError):
                 continue
 
@@ -231,25 +227,33 @@ def easyocr_extract_prices(image_bytes: bytes) -> tuple[List[PriceData], str]:
     prices_with_pos.sort(key=lambda x: x[1])
     sorted_prices = [price for price, _ in prices_with_pos]
 
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_prices = []
+    for p in sorted_prices:
+        if p not in seen:
+            seen.add(p)
+            unique_prices.append(p)
+
     # Map prices based on position
     prices = []
-    if len(sorted_prices) == 3:
+    if len(unique_prices) == 3:
         prices = [
-            PriceData(type='Benzin 95', value=sorted_prices[0]),
-            PriceData(type='Benzin 98', value=sorted_prices[1]),
-            PriceData(type='Diesel', value=sorted_prices[2])
+            PriceData(type='Benzin 95', value=unique_prices[0]),
+            PriceData(type='Benzin 98', value=unique_prices[1]),
+            PriceData(type='Diesel', value=unique_prices[2])
         ]
-    elif len(sorted_prices) == 2:
+    elif len(unique_prices) == 2:
         prices = [
-            PriceData(type='Benzin 95', value=sorted_prices[0]),
-            PriceData(type='Diesel', value=sorted_prices[1])
+            PriceData(type='Benzin 95', value=unique_prices[0]),
+            PriceData(type='Diesel', value=unique_prices[1])
         ]
-    elif len(sorted_prices) == 1:
+    elif len(unique_prices) == 1:
         prices = [
-            PriceData(type='Benzin 95', value=sorted_prices[0])
+            PriceData(type='Benzin 95', value=unique_prices[0])
         ]
     else:
-        raise ValueError(f"Could not extract valid prices. Found: {valid_prices}")
+        raise ValueError(f"Could not extract valid prices. Found: {unique_prices}")
 
     return prices, raw_text
 
