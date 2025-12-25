@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import re
 import os
+import json
 from typing import Optional, List
 from datetime import datetime
 from dotenv import load_dotenv
@@ -64,13 +65,23 @@ async def process_image(
         print(f"OCR processed - Lat: {latitude}, Lng: {longitude}")
         print(f"Extracted prices: {prices}")
 
-        # Auto-submit to TCS if requested and credentials are available
+        # Auto-submit to TCS if requested and credentials/cookies are available
         submission_success = False
         if auto_submit and latitude and longitude:
+            # Try to load cookies from environment (JSON string)
+            tcs_cookies = None
+            tcs_cookies_json = os.getenv('TCS_COOKIES')
+            if tcs_cookies_json:
+                try:
+                    tcs_cookies = json.loads(tcs_cookies_json)
+                except json.JSONDecodeError:
+                    print("Warning: TCS_COOKIES is not valid JSON")
+
+            # Fallback to username/password
             tcs_username = os.getenv('TCS_USERNAME')
             tcs_password = os.getenv('TCS_PASSWORD')
 
-            if tcs_username and tcs_password:
+            if tcs_cookies or (tcs_username and tcs_password):
                 prices_dict = {
                     'benzin_95': next((p.value for p in prices if 'benzin' in p.type.lower() and '95' in p.type), None),
                     'benzin_98': next((p.value for p in prices if 'benzin' in p.type.lower() and '98' in p.type), None),
@@ -79,15 +90,18 @@ async def process_image(
 
                 try:
                     submission_success = submit_to_tcs(
-                        username=tcs_username,
-                        password=tcs_password,
                         latitude=latitude,
                         longitude=longitude,
-                        prices=prices_dict
+                        prices=prices_dict,
+                        cookies=tcs_cookies,
+                        username=tcs_username,
+                        password=tcs_password
                     )
                     print(f"TCS submission: {'Success' if submission_success else 'Failed'}")
                 except Exception as submit_error:
                     print(f"TCS submission error: {str(submit_error)}")
+            else:
+                print("No TCS credentials or cookies available for auto-submit")
 
         return OCRResponse(
             success=True,

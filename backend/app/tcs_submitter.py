@@ -14,7 +14,17 @@ from typing import Optional, Dict
 
 
 class TCSSubmitter:
-    def __init__(self, username: str, password: str, headless: bool = True):
+    def __init__(self, cookies: Optional[Dict] = None, username: str = None, password: str = None, headless: bool = True):
+        """
+        Initialize TCS Submitter
+
+        Args:
+            cookies: Dict of cookies to inject (e.g., {'session': 'abc123', 'auth_token': 'xyz'})
+            username: TCS username (optional, only if using login)
+            password: TCS password (optional, only if using login)
+            headless: Run browser in headless mode
+        """
+        self.cookies = cookies
         self.username = username
         self.password = password
         self.headless = headless
@@ -32,59 +42,88 @@ class TCSSubmitter:
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
 
+        # Allow geolocation override
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option("prefs", {
+            "profile.default_content_setting_values.geolocation": 1
+        })
+
         # Use chromium-driver from system
         service = Service('/usr/bin/chromedriver')
 
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
         self.driver.implicitly_wait(10)
 
+    def _set_geolocation(self, latitude: float, longitude: float, accuracy: float = 100):
+        """Override browser geolocation via Chrome DevTools Protocol"""
+        self.driver.execute_cdp_cmd("Emulation.setGeolocationOverride", {
+            "latitude": latitude,
+            "longitude": longitude,
+            "accuracy": accuracy
+        })
+
+    def _inject_cookies(self):
+        """Inject cookies into the browser session"""
+        if not self.cookies:
+            return
+
+        # Navigate to domain first
+        self.driver.get('https://benzin.tcs.ch')
+        time.sleep(1)
+
+        # Add each cookie
+        for name, value in self.cookies.items():
+            cookie_dict = {
+                'name': name,
+                'value': value,
+                'domain': '.tcs.ch',  # Allow for subdomains
+            }
+            try:
+                self.driver.add_cookie(cookie_dict)
+                print(f"Injected cookie: {name}")
+            except Exception as e:
+                print(f"Failed to inject cookie {name}: {e}")
+
+        # Refresh to apply cookies
+        self.driver.refresh()
+        time.sleep(1)
+
     def login(self) -> bool:
         """
         Login to benzin.tcs.ch
+        If cookies are provided, inject them instead of logging in
         Returns True if successful, False otherwise
         """
         try:
             if not self.driver:
                 self._init_driver()
 
+            # If cookies are provided, use them instead of login
+            if self.cookies:
+                print("Using provided cookies for authentication")
+                self._inject_cookies()
+                return True
+
+            # Otherwise, perform traditional login
+            if not self.username or not self.password:
+                print("No cookies or credentials provided")
+                return False
+
             # Navigate to login page
             self.driver.get('https://benzin.tcs.ch')
-
-            # Wait for page load
             time.sleep(2)
 
-            # TODO: Implement actual login steps
-            # This will depend on the structure of the TCS website
-            # Steps typically include:
-            # 1. Find and click login button
-            # 2. Enter credentials
-            # 3. Submit login form
-            # 4. Verify successful login
+            # TODO: Implement actual login steps if needed
+            # Currently not needed if using cookies
 
-            # Example (adjust selectors based on actual website):
-            # login_btn = self.driver.find_element(By.CSS_SELECTOR, '.login-button')
-            # login_btn.click()
-
-            # WebDriverWait(self.driver, 10).until(
-            #     EC.presence_of_element_located((By.ID, "email"))
-            # )
-
-            # email_field = self.driver.find_element(By.ID, "email")
-            # password_field = self.driver.find_element(By.ID, "password")
-
-            # email_field.send_keys(self.username)
-            # password_field.send_keys(self.password)
-
-            # submit_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-            # submit_btn.click()
-
-            # time.sleep(3)
-
-            print(f"Login attempt for user: {self.username}")
-            return True
+            print(f"[STUB] Would login with user: {self.username}")
+            print("NOTE: Traditional login not implemented - provide cookies instead")
+            return False
 
         except Exception as e:
             print(f"Login failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def submit_prices(
@@ -114,49 +153,63 @@ class TCSSubmitter:
                 if not self.login():
                     return False
 
-            # TODO: Navigate to price submission form
-            # This depends on the actual TCS website structure
+            # Set geolocation to provided coordinates
+            print(f"Setting GPS location to: {latitude}, {longitude}")
+            self._set_geolocation(latitude, longitude)
 
-            # Example flow:
-            # 1. Navigate to "Add Price" or similar page
-            # 2. Enter location (coordinates or search)
-            # 3. Fill in price fields
-            # 4. Submit form
+            # TODO: Analyze benzin.tcs.ch to find the actual selectors
+            # Below is a TEMPLATE structure that needs to be filled with real selectors
 
-            # self.driver.get('https://benzin.tcs.ch/add-price')
+            # Navigate to the main page
+            self.driver.get('https://benzin.tcs.ch')
+            time.sleep(2)
 
-            # Fill in coordinates or location
-            # lat_field = self.driver.find_element(By.ID, "latitude")
-            # lng_field = self.driver.find_element(By.ID, "longitude")
-            # lat_field.send_keys(str(latitude))
-            # lng_field.send_keys(str(longitude))
+            # TODO: Find the "Add Price" or "Preis melden" button
+            # Example:
+            # add_price_btn = WebDriverWait(self.driver, 10).until(
+            #     EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="add-price-button"]'))
+            # )
+            # add_price_btn.click()
 
-            # Fill in prices
+            # TODO: Wait for location/station selection
+            # The site might use GPS to find nearby stations
+            # Then user selects a station from a list or map
+
+            # TODO: Fill in price fields
             # if benzin_95:
-            #     benzin95_field = self.driver.find_element(By.ID, "benzin95")
-            #     benzin95_field.send_keys(str(benzin_95))
+            #     benzin95_input = WebDriverWait(self.driver, 10).until(
+            #         EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="benzin95"]'))
+            #     )
+            #     benzin95_input.clear()
+            #     benzin95_input.send_keys(str(benzin_95))
 
             # if benzin_98:
-            #     benzin98_field = self.driver.find_element(By.ID, "benzin98")
-            #     benzin98_field.send_keys(str(benzin_98))
+            #     benzin98_input = self.driver.find_element(By.CSS_SELECTOR, 'input[name="benzin98"]')
+            #     benzin98_input.clear()
+            #     benzin98_input.send_keys(str(benzin_98))
 
             # if diesel:
-            #     diesel_field = self.driver.find_element(By.ID, "diesel")
-            #     diesel_field.send_keys(str(diesel))
+            #     diesel_input = self.driver.find_element(By.CSS_SELECTOR, 'input[name="diesel"]')
+            #     diesel_input.clear()
+            #     diesel_input.send_keys(str(diesel))
 
-            # Submit
+            # TODO: Submit the form
             # submit_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
             # submit_btn.click()
 
+            # Wait for confirmation
             # time.sleep(2)
 
-            print(f"Submitted prices: B95={benzin_95}, B98={benzin_98}, D={diesel}")
-            print(f"Location: {latitude}, {longitude}")
+            print(f"[STUB] Would submit prices: B95={benzin_95}, B98={benzin_98}, D={diesel}")
+            print(f"[STUB] Location: {latitude}, {longitude}")
+            print("NOTE: Actual submission is not implemented - needs real selectors from benzin.tcs.ch")
 
             return True
 
         except Exception as e:
             print(f"Price submission failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def close(self):
@@ -175,26 +228,28 @@ class TCSSubmitter:
 
 
 def submit_to_tcs(
-    username: str,
-    password: str,
     latitude: float,
     longitude: float,
-    prices: Dict[str, float]
+    prices: Dict[str, float],
+    cookies: Optional[Dict] = None,
+    username: str = None,
+    password: str = None
 ) -> bool:
     """
     Convenience function to submit prices to TCS
 
     Args:
-        username: TCS account username
-        password: TCS account password
         latitude: GPS latitude
         longitude: GPS longitude
         prices: Dictionary with keys 'benzin_95', 'benzin_98', 'diesel'
+        cookies: Dict of cookies for authentication (preferred method)
+        username: TCS account username (fallback)
+        password: TCS account password (fallback)
 
     Returns:
         True if successful, False otherwise
     """
-    with TCSSubmitter(username, password) as submitter:
+    with TCSSubmitter(cookies=cookies, username=username, password=password) as submitter:
         return submitter.submit_prices(
             latitude=latitude,
             longitude=longitude,
