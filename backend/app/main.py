@@ -55,8 +55,17 @@ async def process_image(
         contents = await image.read()
         img = Image.open(io.BytesIO(contents))
 
-        # Perform OCR
-        text = pytesseract.image_to_string(img, lang='deu+fra+ita')
+        # Convert to grayscale for better OCR
+        img = img.convert('L')
+
+        # Increase contrast
+        from PIL import ImageEnhance
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.0)
+
+        # Perform OCR with additional config
+        custom_config = r'--oem 3 --psm 6'
+        text = pytesseract.image_to_string(img, lang='deu+fra+ita', config=custom_config)
 
         # Extract prices
         prices = extract_prices(text)
