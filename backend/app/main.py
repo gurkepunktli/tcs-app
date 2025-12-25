@@ -128,9 +128,14 @@ def extract_prices(text: str) -> List[PriceData]:
     # Normalize text
     text = text.replace(',', '.')
 
-    # Extract all price-like numbers (format: X.XX or X.XXX)
-    price_pattern = r'\b(\d{1}\.\d{2,3})\b'
+    # Log OCR text for debugging
+    print(f"OCR Text: {text}")
+
+    # Extract all price-like numbers (format: X.XX or X.XXX or just X.X)
+    # Matches: 1.72, 1.80, 1.723, etc.
+    price_pattern = r'\b(\d{1,2}\.\d{1,3})\b'
     found_prices = re.findall(price_pattern, text)
+    print(f"Found prices: {found_prices}")
 
     # Convert to floats and validate range
     valid_prices = []
