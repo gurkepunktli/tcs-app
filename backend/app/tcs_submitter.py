@@ -7,7 +7,7 @@ import json
 import asyncio
 from typing import Optional, Dict
 from langchain_openai import ChatOpenAI
-from browser_use import Agent, Browser, BrowserConfig
+from browser_use import Agent
 from playwright.async_api import async_playwright
 
 
@@ -29,6 +29,7 @@ class TCSSubmitter:
         self.browser = None
         self.context = None
         self.page = None
+        self.playwright = None
 
         # Get OpenRouter API key from environment
         api_key = os.getenv('OPENROUTER_API_KEY')
@@ -47,14 +48,9 @@ class TCSSubmitter:
 
     async def _init_browser(self):
         """Initialize Playwright browser"""
-        playwright = await async_playwright().start()
+        self.playwright = await async_playwright().start()
 
-        browser_config = BrowserConfig(
-            headless=self.headless,
-            disable_security=False,
-        )
-
-        self.browser = await playwright.chromium.launch(
+        self.browser = await self.playwright.chromium.launch(
             headless=self.headless,
             args=[
                 '--no-sandbox',
