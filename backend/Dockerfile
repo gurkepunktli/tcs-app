@@ -23,6 +23,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install Playwright browsers (Chromium)
 RUN playwright install --with-deps chromium
 
+# Workaround for browser-use chromium path detection issue with Playwright 1.57+
+# Creates symlink from chrome-linux64 to chrome-linux for browser-use compatibility
+RUN for dir in /root/.cache/ms-playwright/chromium-*/; do \
+    if [ -d "${dir}chrome-linux64" ] && [ ! -e "${dir}chrome-linux" ]; then \
+        ln -s chrome-linux64 "${dir}chrome-linux"; \
+    fi \
+done
+
 # Copy application code
 COPY app/ .
 

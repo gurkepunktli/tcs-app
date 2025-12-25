@@ -152,8 +152,9 @@ class TCSSubmitter:
             """
 
             # Create browser-use BrowserSession
+            # Set headless=True for Docker environments to avoid display issues
             browser_session = BrowserSession(
-                headless=self.headless,
+                headless=True,  # Always use headless in Docker
                 disable_security=True,
             )
 
@@ -244,8 +245,9 @@ class TCSSubmitter:
             print(f"Location: {latitude}, {longitude}")
 
             # Create browser-use BrowserSession with geolocation
+            # Set headless=True for Docker environments to avoid display issues
             browser_session = BrowserSession(
-                headless=self.headless,
+                headless=True,  # Always use headless in Docker
                 disable_security=True,
                 geolocation={'latitude': latitude, 'longitude': longitude},
             )
