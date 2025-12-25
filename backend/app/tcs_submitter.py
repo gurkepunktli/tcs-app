@@ -39,12 +39,11 @@ class TCSSubmitter:
         # Get model choice from environment (default to Claude 3.5 Sonnet)
         model_name = os.getenv('LLM_MODEL', 'anthropic/claude-3.5-sonnet')
 
-        # Initialize LLM with OpenRouter - use openai_api_key for browser-use compatibility
+        # Initialize LLM with OpenRouter for browser-use compatibility
         self.llm = ChatOpenAI(
+            base_url='https://openrouter.ai/api/v1',
             model=model_name,
-            openai_api_key=api_key,
-            openai_api_base="https://openrouter.ai/api/v1",
-            model_kwargs={"provider": {"order": ["OpenRouter"]}}
+            api_key=api_key
         )
 
     async def _init_browser(self):
