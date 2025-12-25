@@ -20,6 +20,10 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Patch browser-use for OpenRouter compatibility (Issue #567)
+COPY patch_browser_use.py .
+RUN python patch_browser_use.py
+
 # Install Playwright browsers (Chromium)
 RUN playwright install --with-deps chromium
 
