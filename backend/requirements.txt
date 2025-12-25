@@ -8,8 +8,8 @@ python-dotenv
 playwright
 langchain-openai
 browser-use
-paddleocr
-paddlepaddle
+paddleocr==2.7.3
+paddlepaddle==2.6.1
 httpx
 numpy
 opencv-python-headless
