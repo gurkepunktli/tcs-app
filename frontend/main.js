@@ -163,6 +163,12 @@ async function uploadPhoto() {
             formData.append('accuracy', coordinates.accuracy);
         }
 
+        // Check if auto-submit is enabled
+        const autoSubmitCheckbox = document.getElementById('auto-submit-checkbox');
+        if (autoSubmitCheckbox && autoSubmitCheckbox.checked) {
+            formData.append('auto_submit', 'true');
+        }
+
         // Send to backend
         const apiResponse = await fetch(`${API_URL}/api/ocr/process`, {
             method: 'POST',

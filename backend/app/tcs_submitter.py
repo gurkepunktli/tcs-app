@@ -109,8 +109,8 @@ class TCSSubmitter:
 
     async def login(self) -> bool:
         """
-        Login to benzin.tcs.ch
-        If cookies are provided, inject them instead of logging in
+        Login to benzin.tcs.ch using Browser-Use AI agent
+        Handles Azure B2C login flow automatically
         Returns True if successful, False otherwise
         """
         try:
@@ -123,20 +123,66 @@ class TCSSubmitter:
                 await self._inject_cookies()
                 return True
 
-            # Otherwise, perform traditional login
+            # Otherwise, perform AI-powered login with Azure B2C
             if not self.username or not self.password:
                 print("No cookies or credentials provided")
                 return False
 
+            print(f"Logging in with username: {self.username}")
+
             # Navigate to login page
             await self.page.goto('https://benzin.tcs.ch')
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
 
-            # TODO: Implement actual login steps if needed
-            # Currently not needed if using cookies
-            print(f"[STUB] Would login with user: {self.username}")
-            print("NOTE: Traditional login not implemented - provide cookies instead")
-            return False
+            # Use Browser-Use AI agent to handle Azure B2C login
+            login_task = f"""
+            You are on benzin.tcs.ch. Your task is to log in to the TCS website.
+
+            Steps:
+            1. Find and click the "Anmelden" or "Login" button
+            2. You will be redirected to an Azure B2C login page (touringclubsuisseb2c.b2clogin.com)
+            3. Enter the email address: {self.username}
+            4. Enter the password: {self.password}
+            5. Click the login/submit button
+            6. Wait for successful login and redirect back to benzin.tcs.ch
+
+            Important:
+            - The login form may be in German, French, or Italian
+            - Look for fields labeled "E-Mail", "Email", "Benutzername" or similar
+            - Password field may be labeled "Passwort", "Password", "Kennwort" or similar
+            - After successful login, you should be redirected back to the main page
+            - Verify that you see your account name or a "Abmelden" (logout) button
+
+            Stop when you can confirm you are logged in successfully.
+            """
+
+            agent = Agent(
+                task=login_task,
+                llm=self.llm,
+            )
+
+            result = await agent.run(page=self.page)
+            print(f"Login agent result: {result}")
+
+            # Verify login success by checking for logout button or user account
+            await asyncio.sleep(2)
+            page_content = await self.page.content()
+
+            # Check for common indicators of successful login
+            logged_in = any(indicator in page_content.lower() for indicator in [
+                'abmelden',
+                'logout',
+                'se déconnecter',
+                'mein konto',
+                'mon compte'
+            ])
+
+            if logged_in:
+                print("Login successful!")
+                return True
+            else:
+                print("Login verification failed - could not confirm successful login")
+                return False
 
         except Exception as e:
             print(f"Login failed: {str(e)}")
