@@ -57,7 +57,7 @@ async def process_image(
         contents = await image.read()
         img = Image.open(io.BytesIO(contents))
 
-        # Try Vision API first (Llama 3.2 Vision via OpenRouter)
+        # Try Vision API first (Qwen Vision via OpenRouter)
         prices = []
         text = ""
 
@@ -149,7 +149,7 @@ async def process_image(
 
 async def vision_extract_prices(image_bytes: bytes) -> tuple[List[PriceData], str]:
     """
-    Use Llama 3.2 Vision via OpenRouter to extract fuel prices from LED displays.
+    Use Qwen Vision via OpenRouter to extract fuel prices from LED displays.
     Returns (prices, raw_text) tuple.
     """
     api_key = os.getenv('OPENROUTER_API_KEY')
@@ -191,7 +191,7 @@ Keine weiteren Erklärungen, nur das JSON."""
                 "Content-Type": "application/json"
             },
             json={
-                "model": "google/gemini-flash-1.5",
+                "model": "qwen/qwen-2.5-vl-7b-instruct",
                 "messages": [
                     {
                         "role": "user",
