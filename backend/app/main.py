@@ -117,50 +117,50 @@ async def process_image(
 
 def extract_prices(text: str) -> List[PriceData]:
     """
-    Extract fuel prices from OCR text.
-    Searches for patterns like:
-    - Benzin 95: 1.75
-    - Diesel 1.85
-    - 95 1.75
-    - etc.
+    Extract fuel prices from OCR text using line-based approach.
+
+    Assumes:
+    - 3 lines = Line 1: Benzin 95, Line 2: Benzin 98, Line 3: Diesel
+    - 2 lines = Line 1: Benzin 95, Line 2: Diesel
     """
     prices = []
 
     # Normalize text
     text = text.replace(',', '.')
 
-    # Price patterns
-    patterns = [
-        # "Benzin 95: 1.75" or "Benzin 95 1.75"
-        (r'benzin\s*95\D*?(\d+\.\d+)', 'Benzin 95'),
-        (r'95\D*?(\d+\.\d+)', 'Benzin 95'),
+    # Extract all price-like numbers (format: X.XX or X.XXX)
+    price_pattern = r'\b(\d{1}\.\d{2,3})\b'
+    found_prices = re.findall(price_pattern, text)
 
-        # "Benzin 98: 1.85" or "Benzin 98 1.85"
-        (r'benzin\s*98\D*?(\d+\.\d+)', 'Benzin 98'),
-        (r'98\D*?(\d+\.\d+)', 'Benzin 98'),
+    # Convert to floats and validate range
+    valid_prices = []
+    for price_str in found_prices:
+        try:
+            price = float(price_str)
+            if 1.0 <= price <= 3.0:  # Reasonable CHF price range
+                valid_prices.append(price)
+        except ValueError:
+            continue
 
-        # "Diesel: 1.80" or "Diesel 1.80"
-        (r'diesel\D*?(\d+\.\d+)', 'Diesel'),
-
-        # Generic "Super" patterns
-        (r'super\s*95\D*?(\d+\.\d+)', 'Benzin 95'),
-        (r'super\s*98\D*?(\d+\.\d+)', 'Benzin 98'),
-    ]
-
-    text_lower = text.lower()
-    seen_types = set()
-
-    for pattern, fuel_type in patterns:
-        matches = re.findall(pattern, text_lower)
-        if matches and fuel_type not in seen_types:
-            try:
-                price_value = float(matches[0])
-                # Validate reasonable price range (CHF 1.00 - 3.00)
-                if 1.0 <= price_value <= 3.0:
-                    prices.append(PriceData(type=fuel_type, value=price_value))
-                    seen_types.add(fuel_type)
-            except ValueError:
-                continue
+    # Map prices based on position
+    if len(valid_prices) == 3:
+        # 3 prices: Benzin 95, Benzin 98, Diesel
+        prices = [
+            PriceData(type='Benzin 95', value=valid_prices[0]),
+            PriceData(type='Benzin 98', value=valid_prices[1]),
+            PriceData(type='Diesel', value=valid_prices[2])
+        ]
+    elif len(valid_prices) == 2:
+        # 2 prices: Benzin 95, Diesel
+        prices = [
+            PriceData(type='Benzin 95', value=valid_prices[0]),
+            PriceData(type='Diesel', value=valid_prices[1])
+        ]
+    elif len(valid_prices) == 1:
+        # Only 1 price found, assume Benzin 95
+        prices = [
+            PriceData(type='Benzin 95', value=valid_prices[0])
+        ]
 
     return prices
 
