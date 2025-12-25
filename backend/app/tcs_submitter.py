@@ -35,15 +35,19 @@ class TCSSubmitter:
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable not set")
 
-        # Get model choice from environment (default to Claude 3.5 Sonnet)
-        model_name = os.getenv('LLM_MODEL', 'anthropic/claude-3.5-sonnet')
+        # Get model choice from environment (default to Gemini 2.0 Flash - best for browser-use)
+        model_name = os.getenv('LLM_MODEL', 'google/gemini-2.0-flash-exp:free')
 
         # Initialize LLM with OpenRouter for browser-use compatibility
         # Use browser_use.ChatOpenAI which wraps langchain properly
         self.llm = ChatOpenAI(
             base_url='https://openrouter.ai/api/v1',
             api_key=api_key,
-            model=model_name
+            model=model_name,
+            default_headers={
+                'HTTP-Referer': 'https://github.com/gurkepunktli/tcs-app',
+                'X-Title': 'TCS Benzin Price Submitter'
+            }
         )
 
     async def _init_browser(self):
