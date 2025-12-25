@@ -6,8 +6,7 @@ import os
 import json
 import asyncio
 from typing import Optional, Dict
-from browser_use import Agent, ChatOpenAI, Browser, BrowserConfig
-from browser_use.browser.context import BrowserContextConfig
+from browser_use import Agent, ChatOpenAI, BrowserSession
 from playwright.async_api import async_playwright
 
 
@@ -152,29 +151,22 @@ class TCSSubmitter:
             Stop when you can confirm you are logged in successfully.
             """
 
-            # Create browser-use Browser with proper configuration
-            browser_config = BrowserConfig(
+            # Create browser-use BrowserSession
+            browser_session = BrowserSession(
                 headless=self.headless,
                 disable_security=True,
-                extra_chromium_args=[
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                ]
             )
-
-            browser = Browser(config=browser_config)
 
             agent = Agent(
                 task=login_task,
                 llm=self.llm,
-                browser=browser,
+                browser_session=browser_session,
             )
 
             result = await agent.run()
             print(f"Login agent result: {result}")
 
-            await browser.close()
+            await browser_session.close()
 
             print("Login completed by AI agent")
             return True
@@ -251,35 +243,24 @@ class TCSSubmitter:
             print(f"Starting AI agent to submit prices: {price_text}")
             print(f"Location: {latitude}, {longitude}")
 
-            # Create browser-use Browser with geolocation and proper configuration
-            browser_config = BrowserConfig(
+            # Create browser-use BrowserSession with geolocation
+            browser_session = BrowserSession(
                 headless=self.headless,
                 disable_security=True,
-                extra_chromium_args=[
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                ],
-                # Configure context with geolocation
-                new_context_config=BrowserContextConfig(
-                    geolocation={'latitude': latitude, 'longitude': longitude, 'accuracy': 100},
-                    permissions=['geolocation']
-                )
+                geolocation={'latitude': latitude, 'longitude': longitude},
             )
-
-            browser = Browser(config=browser_config)
 
             agent = Agent(
                 task=task,
                 llm=self.llm,
-                browser=browser,
+                browser_session=browser_session,
             )
 
             result = await agent.run()
 
             print(f"AI agent completed with result: {result}")
 
-            await browser.close()
+            await browser_session.close()
 
             return True
 
