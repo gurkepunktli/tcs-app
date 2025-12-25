@@ -6,8 +6,7 @@ import os
 import json
 import asyncio
 from typing import Optional, Dict
-from langchain_openai import ChatOpenAI
-from browser_use import Agent
+from browser_use import Agent, ChatOpenAI
 from playwright.async_api import async_playwright
 
 
