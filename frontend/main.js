@@ -55,9 +55,11 @@ async function startCamera() {
     }
 }
 
-// Get GPS location
+// Get GPS location with improved accuracy
 function getLocation() {
     if ('geolocation' in navigator) {
+        console.log('Requesting high-accuracy GPS location...');
+
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 coordinates = {
@@ -66,17 +68,45 @@ function getLocation() {
                     accuracy: position.coords.accuracy
                 };
                 console.log('Standort erfasst:', coordinates);
+
+                // Show accuracy warning in UI if needed
+                const accuracyWarning = document.getElementById('accuracy-warning');
+                if (accuracyWarning) {
+                    if (coordinates.accuracy > 20) {
+                        accuracyWarning.textContent = `⚠️ GPS-Genauigkeit: ±${Math.round(coordinates.accuracy)}m (sollte ≤20m sein)`;
+                        accuracyWarning.style.display = 'block';
+                    } else {
+                        accuracyWarning.style.display = 'none';
+                    }
+                }
             },
             (error) => {
                 console.error('Standort-Fehler:', error);
+                let errorMessage = 'Standort konnte nicht ermittelt werden';
+
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMessage = 'GPS-Berechtigung verweigert. Bitte in den Browser-Einstellungen aktivieren.';
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMessage = 'GPS-Position nicht verfügbar. Stelle sicher, dass GPS aktiviert ist.';
+                        break;
+                    case error.TIMEOUT:
+                        errorMessage = 'GPS-Timeout. Bitte draußen versuchen für besseren Empfang.';
+                        break;
+                }
+
+                alert(errorMessage);
                 coordinates = null;
             },
             {
-                enableHighAccuracy: true,
-                maximumAge: 0,
-                timeout: 10000
+                enableHighAccuracy: true,  // Force GPS usage instead of WiFi/IP
+                maximumAge: 0,             // Don't use cached position
+                timeout: 30000             // Increased timeout to 30 seconds for GPS lock
             }
         );
+    } else {
+        alert('Geolocation wird von diesem Browser nicht unterstützt.');
     }
 }
 
