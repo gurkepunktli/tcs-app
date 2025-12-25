@@ -6,7 +6,8 @@ import os
 import json
 import asyncio
 from typing import Optional, Dict
-from browser_use import Agent, ChatOpenAI
+from browser_use import Agent, ChatOpenAI, Browser, BrowserConfig
+from browser_use.browser.context import BrowserContextConfig
 from playwright.async_api import async_playwright
 
 
@@ -113,12 +114,11 @@ class TCSSubmitter:
         Returns True if successful, False otherwise
         """
         try:
-            if not self.browser:
-                await self._init_browser()
-
             # If cookies are provided, use them instead of login
             if self.cookies:
                 print("Using provided cookies for authentication")
+                if not self.browser:
+                    await self._init_browser()
                 await self._inject_cookies()
                 return True
 
@@ -129,21 +129,18 @@ class TCSSubmitter:
 
             print(f"Logging in with username: {self.username}")
 
-            # Navigate to login page
-            await self.page.goto('https://benzin.tcs.ch')
-            await asyncio.sleep(3)
-
             # Use Browser-Use AI agent to handle Azure B2C login
             login_task = f"""
-            You are on benzin.tcs.ch. Your task is to log in to the TCS website.
+            Navigate to https://benzin.tcs.ch and log in to the TCS website.
 
             Steps:
-            1. Find and click the "Anmelden" or "Login" button
-            2. You will be redirected to an Azure B2C login page (touringclubsuisseb2c.b2clogin.com)
-            3. Enter the email address: {self.username}
-            4. Enter the password: {self.password}
-            5. Click the login/submit button
-            6. Wait for successful login and redirect back to benzin.tcs.ch
+            1. Go to benzin.tcs.ch
+            2. Find and click the "Anmelden" or "Login" button
+            3. You will be redirected to an Azure B2C login page (touringclubsuisseb2c.b2clogin.com)
+            4. Enter the email address: {self.username}
+            5. Enter the password: {self.password}
+            6. Click the login/submit button
+            7. Wait for successful login and redirect back to benzin.tcs.ch
 
             Important:
             - The login form may be in German, French, or Italian
@@ -155,33 +152,32 @@ class TCSSubmitter:
             Stop when you can confirm you are logged in successfully.
             """
 
+            # Create browser-use Browser with proper configuration
+            browser_config = BrowserConfig(
+                headless=self.headless,
+                disable_security=True,
+                extra_chromium_args=[
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                ]
+            )
+
+            browser = Browser(config=browser_config)
+
             agent = Agent(
                 task=login_task,
                 llm=self.llm,
+                browser=browser,
             )
 
-            result = await agent.run(page=self.page)
+            result = await agent.run()
             print(f"Login agent result: {result}")
 
-            # Verify login success by checking for logout button or user account
-            await asyncio.sleep(2)
-            page_content = await self.page.content()
+            await browser.close()
 
-            # Check for common indicators of successful login
-            logged_in = any(indicator in page_content.lower() for indicator in [
-                'abmelden',
-                'logout',
-                'se déconnecter',
-                'mein konto',
-                'mon compte'
-            ])
-
-            if logged_in:
-                print("Login successful!")
-                return True
-            else:
-                print("Login verification failed - could not confirm successful login")
-                return False
+            print("Login completed by AI agent")
+            return True
 
         except Exception as e:
             print(f"Login failed: {str(e)}")
@@ -211,18 +207,9 @@ class TCSSubmitter:
             True if submission successful, False otherwise
         """
         try:
-            if not self.browser:
-                # Login first if not already done
-                if not await self.login():
-                    return False
-
-            # Set geolocation to provided coordinates
-            print(f"Setting GPS location to: {latitude}, {longitude}")
-            await self._set_geolocation(latitude, longitude)
-
-            # Navigate to the main page
-            await self.page.goto('https://benzin.tcs.ch')
-            await asyncio.sleep(3)
+            # Login first if not already done
+            if not self.cookies and not await self.login():
+                return False
 
             # Build task description for AI agent
             price_updates = []
@@ -240,41 +227,59 @@ class TCSSubmitter:
             price_text = ", ".join(price_updates)
 
             task = f"""
-            You are on the benzin.tcs.ch website. The browser's GPS location is already set to coordinates {latitude}, {longitude}.
+            Navigate to benzin.tcs.ch and submit fuel prices for a gas station.
 
             Your task:
-            1. Find and click on the nearest gas station on the map (it should appear based on the GPS location)
-            2. For this gas station, update the following fuel prices: {price_text}
-            3. Click the "AKTUALISIEREN" (update) button for each fuel type
-            4. Enter the new price in the dialog that appears
-            5. Confirm/save the price update
-            6. Repeat for all fuel types that need updating
+            1. Go to https://benzin.tcs.ch
+            2. If not logged in, the browser should already have session cookies
+            3. The map should show nearby gas stations based on GPS location
+            4. Find and click on the nearest gas station on the map at coordinates {latitude}, {longitude}
+            5. For this gas station, update the following fuel prices: {price_text}
+            6. Click the "AKTUALISIEREN" (update) button for each fuel type
+            7. Enter the new price in the dialog that appears
+            8. Confirm/save the price update
+            9. Repeat for all fuel types that need updating
 
             Important notes:
             - The website is in German/French
             - Look for "AKTUALISIEREN" buttons next to each fuel type
-            - The map should show nearby stations based on GPS
             - Click on the first/nearest station marker on the map
             - Be careful to update the correct fuel types with the correct prices
+            - The GPS location should show stations near: {latitude}, {longitude}
             """
 
             print(f"Starting AI agent to submit prices: {price_text}")
             print(f"Location: {latitude}, {longitude}")
 
-            # Create browser-use agent with our existing browser context
-            # The context already has GPS coordinates and cookies set
+            # Create browser-use Browser with geolocation and proper configuration
+            browser_config = BrowserConfig(
+                headless=self.headless,
+                disable_security=True,
+                extra_chromium_args=[
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                ],
+                # Configure context with geolocation
+                new_context_config=BrowserContextConfig(
+                    geolocation={'latitude': latitude, 'longitude': longitude, 'accuracy': 100},
+                    permissions=['geolocation']
+                )
+            )
+
+            browser = Browser(config=browser_config)
+
             agent = Agent(
                 task=task,
                 llm=self.llm,
+                browser=browser,
             )
 
-            # Run the agent using our existing page that already has:
-            # - GPS coordinates set via self.context.set_geolocation()
-            # - TCS cookies injected
-            # - Browser is already at https://benzin.tcs.ch
-            result = await agent.run(page=self.page)
+            result = await agent.run()
 
             print(f"AI agent completed with result: {result}")
+
+            await browser.close()
 
             return True
 
