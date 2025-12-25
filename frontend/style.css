@@ -114,6 +114,13 @@ main {
     color: var(--white);
 }
 
+#start-camera {
+    padding: 1.5rem 2rem;
+    font-size: 1.3rem;
+    min-width: 100%;
+    font-weight: 600;
+}
+
 #preview-section, #result-section {
     background: var(--white);
     border-radius: 8px;
