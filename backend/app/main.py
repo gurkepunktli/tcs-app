@@ -172,11 +172,14 @@ Extrahiere ALLE sichtbaren Benzinpreise in CHF. Die Preise sind auf LED-Displays
 
 WICHTIG:
 - Gib die Preise in der Reihenfolge von oben nach unten an
-- Format: Nur die Zahlen, z.B. "1.86" (mit Punkt, nicht Komma)
+- Format: IMMER mit Dezimalpunkt, z.B. "1.86" nicht "186"
+- Benzinpreise in der Schweiz liegen normalerweise zwischen 1.50 und 2.50 CHF pro Liter
+- Wenn du "186" auf dem Display siehst, interpretiere es als "1.86" (Dezimalpunkt nach der ersten Ziffer)
+- Wenn du "196" siehst, ist es "1.96" usw.
 - Wenn 3 Preise sichtbar sind: 1. Benzin 95, 2. Benzin 98, 3. Diesel
 - Wenn 2 Preise sichtbar sind: 1. Benzin 95, 2. Diesel
 
-Antworte NUR mit den Preisen in folgender JSON-Struktur:
+Antworte NUR mit den Preisen in folgender JSON-Struktur (IMMER mit Dezimalpunkt):
 {
   "prices": ["1.86", "1.96", "1.95"]
 }
