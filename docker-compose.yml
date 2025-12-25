@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  tcs-api:
+    build: ./backend
+    container_name: tcs-ocr-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app
+    env_file:
+      - ./backend/.env
+    networks:
+      - fiber.x_net
+    restart: unless-stopped
+
+networks:
+  fiber.x_net:
+    external: true

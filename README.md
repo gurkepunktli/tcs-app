@@ -65,7 +65,7 @@ npm run build
    docker-compose up -d
    ```
 
-4. **Via Portainer**:
+4. **Via Portainer** (siehe [`PORTAINER_SETUP.md`](PORTAINER_SETUP.md)):
    - Stack importieren aus GitHub
    - Network: `fiber.x_net` (external)
    - Environment Variables setzen
@@ -190,6 +190,7 @@ docker-compose build --no-cache
 
 ## Dokumentation
 
+- [`PORTAINER_SETUP.md`](PORTAINER_SETUP.md) - Portainer Deployment Guide
 - [`backend/COOKIE_HOWTO.md`](backend/COOKIE_HOWTO.md) - Cookies exportieren
 - [`backend/NEXT_STEPS.md`](backend/NEXT_STEPS.md) - Entwicklungs-Guide
 - [browser-use Docs](https://github.com/browser-use/browser-use)

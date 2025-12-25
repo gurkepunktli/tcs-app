@@ -220,15 +220,18 @@ class TCSSubmitter:
             print(f"Starting AI agent to submit prices: {price_text}")
             print(f"Location: {latitude}, {longitude}")
 
-            # Create browser-use agent
+            # Create browser-use agent with our existing browser context
+            # The context already has GPS coordinates and cookies set
             agent = Agent(
                 task=task,
                 llm=self.llm,
-                browser=Browser(config=BrowserConfig(headless=self.headless))
             )
 
-            # Run the agent with existing page
-            result = await agent.run(start_url='https://benzin.tcs.ch')
+            # Run the agent using our existing page that already has:
+            # - GPS coordinates set via self.context.set_geolocation()
+            # - TCS cookies injected
+            # - Browser is already at https://benzin.tcs.ch
+            result = await agent.run(page=self.page)
 
             print(f"AI agent completed with result: {result}")
 
