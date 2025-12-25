@@ -6,11 +6,13 @@ import io
 import re
 import os
 import json
+import base64
 from typing import Optional, List
 from datetime import datetime
 from dotenv import load_dotenv
 from models import OCRResponse, PriceData
 from tcs_submitter import submit_to_tcs
+import httpx
 
 # Load environment variables
 load_dotenv()
@@ -55,42 +57,41 @@ async def process_image(
         contents = await image.read()
         img = Image.open(io.BytesIO(contents))
 
-        # Try multiple OCR strategies for LED displays
-        from PIL import ImageEnhance, ImageFilter
+        # Try EasyOCR first (best for LED displays, free and local)
+        prices = []
+        text = ""
 
-        # Strategy 1: Digits-only OCR with aggressive preprocessing
-        img_digits = img.convert('L')
+        try:
+            prices, text = easyocr_extract_prices(contents)
+            print(f"EasyOCR extraction successful: {prices}")
+        except Exception as easyocr_error:
+            print(f"EasyOCR failed: {easyocr_error}, falling back to Tesseract")
 
-        # Apply sharpening
-        img_digits = img_digits.filter(ImageFilter.SHARPEN)
+            # Fallback to Tesseract OCR
+            from PIL import ImageEnhance, ImageFilter
 
-        # Increase contrast significantly for LED displays
-        enhancer = ImageEnhance.Contrast(img_digits)
-        img_digits = enhancer.enhance(3.0)
+            # Strategy 1: Digits-only OCR with aggressive preprocessing
+            img_digits = img.convert('L')
+            img_digits = img_digits.filter(ImageFilter.SHARPEN)
+            enhancer = ImageEnhance.Contrast(img_digits)
+            img_digits = enhancer.enhance(3.0)
+            enhancer = ImageEnhance.Brightness(img_digits)
+            img_digits = enhancer.enhance(1.2)
+            digits_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789.'
+            text_digits = pytesseract.image_to_string(img_digits, config=digits_config)
 
-        # Increase brightness
-        enhancer = ImageEnhance.Brightness(img_digits)
-        img_digits = enhancer.enhance(1.2)
+            # Strategy 2: Standard OCR
+            img_standard = img.convert('L')
+            enhancer = ImageEnhance.Contrast(img_standard)
+            img_standard = enhancer.enhance(2.0)
+            standard_config = r'--oem 3 --psm 6'
+            text_standard = pytesseract.image_to_string(img_standard, lang='deu+fra+ita', config=standard_config)
 
-        # OCR with digits-only whitelist for LED displays
-        digits_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789.'
-        text_digits = pytesseract.image_to_string(img_digits, config=digits_config)
+            text = text_digits if len(text_digits.strip()) > len(text_standard.strip()) else text_standard
+            print(f"Tesseract fallback - Selected: {'digits' if text == text_digits else 'standard'}")
 
-        # Strategy 2: Standard OCR with moderate preprocessing (fallback)
-        img_standard = img.convert('L')
-        enhancer = ImageEnhance.Contrast(img_standard)
-        img_standard = enhancer.enhance(2.0)
-        standard_config = r'--oem 3 --psm 6'
-        text_standard = pytesseract.image_to_string(img_standard, lang='deu+fra+ita', config=standard_config)
-
-        # Use digits-only result if it found more numbers, otherwise use standard
-        text = text_digits if len(text_digits.strip()) > len(text_standard.strip()) else text_standard
-        print(f"Digits-only OCR: {text_digits}")
-        print(f"Standard OCR: {text_standard}")
-        print(f"Selected: {'digits' if text == text_digits else 'standard'}")
-
-        # Extract prices
-        prices = extract_prices(text)
+            # Extract prices from Tesseract output
+            prices = extract_prices(text)
 
         # Log the result
         print(f"OCR processed - Lat: {latitude}, Lng: {longitude}")
@@ -144,6 +145,113 @@ async def process_image(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
+
+
+# Global EasyOCR reader (initialized once to avoid reloading models)
+_easyocr_reader = None
+
+def get_easyocr_reader():
+    """Lazy load EasyOCR reader (singleton pattern)"""
+    global _easyocr_reader
+    if _easyocr_reader is None:
+        import easyocr
+        # Use English for digits, German/French/Italian for text labels
+        _easyocr_reader = easyocr.Reader(['en'], gpu=False)
+    return _easyocr_reader
+
+
+def easyocr_extract_prices(image_bytes: bytes) -> tuple[List[PriceData], str]:
+    """
+    Use EasyOCR to extract fuel prices from LED displays.
+    Returns (prices, raw_text) tuple.
+    """
+    import numpy as np
+
+    # Load image
+    img = Image.open(io.BytesIO(image_bytes))
+
+    # Convert to RGB if needed
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+
+    # Convert PIL Image to numpy array for EasyOCR
+    img_array = np.array(img)
+
+    # Get EasyOCR reader
+    reader = get_easyocr_reader()
+
+    # Perform OCR with allowlist for digits and decimal point
+    results = reader.readtext(
+        img_array,
+        allowlist='0123456789.',
+        detail=1,
+        paragraph=False
+    )
+
+    # Extract detected text and bounding boxes
+    detected_texts = []
+    for bbox, text, confidence in results:
+        # Only keep high confidence detections
+        if confidence > 0.3:
+            detected_texts.append((text, bbox, confidence))
+            print(f"EasyOCR detected: '{text}' (confidence: {confidence:.2f})")
+
+    # Combine all detected text
+    raw_text = ' '.join([text for text, _, _ in detected_texts])
+
+    # Extract price-like patterns
+    price_pattern = r'(\d{1,2}\.\d{1,3})'
+    found_prices = re.findall(price_pattern, raw_text)
+
+    # Convert to floats and validate
+    valid_prices = []
+    for price_str in found_prices:
+        try:
+            price = float(price_str)
+            if 1.0 <= price <= 3.0:  # Reasonable CHF price range
+                valid_prices.append(price)
+        except ValueError:
+            continue
+
+    # Sort by vertical position (top to bottom)
+    # Use bbox center Y coordinate for sorting
+    prices_with_pos = []
+    for text, bbox, conf in detected_texts:
+        for price_str in re.findall(price_pattern, text):
+            try:
+                price = float(price_str)
+                if 1.0 <= price <= 3.0:
+                    # Calculate vertical center of bounding box
+                    y_center = (bbox[0][1] + bbox[2][1]) / 2
+                    prices_with_pos.append((price, y_center))
+            except (ValueError, IndexError):
+                continue
+
+    # Sort by Y position (top to bottom)
+    prices_with_pos.sort(key=lambda x: x[1])
+    sorted_prices = [price for price, _ in prices_with_pos]
+
+    # Map prices based on position
+    prices = []
+    if len(sorted_prices) == 3:
+        prices = [
+            PriceData(type='Benzin 95', value=sorted_prices[0]),
+            PriceData(type='Benzin 98', value=sorted_prices[1]),
+            PriceData(type='Diesel', value=sorted_prices[2])
+        ]
+    elif len(sorted_prices) == 2:
+        prices = [
+            PriceData(type='Benzin 95', value=sorted_prices[0]),
+            PriceData(type='Diesel', value=sorted_prices[1])
+        ]
+    elif len(sorted_prices) == 1:
+        prices = [
+            PriceData(type='Benzin 95', value=sorted_prices[0])
+        ]
+    else:
+        raise ValueError(f"Could not extract valid prices. Found: {valid_prices}")
+
+    return prices, raw_text
 
 
 def extract_prices(text: str) -> List[PriceData]:

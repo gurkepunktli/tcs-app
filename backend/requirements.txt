@@ -8,3 +8,6 @@ python-dotenv
 playwright
 langchain-openai
 browser-use
+easyocr
+httpx
+numpy
