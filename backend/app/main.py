@@ -55,17 +55,39 @@ async def process_image(
         contents = await image.read()
         img = Image.open(io.BytesIO(contents))
 
-        # Convert to grayscale for better OCR
-        img = img.convert('L')
+        # Try multiple OCR strategies for LED displays
+        from PIL import ImageEnhance, ImageFilter
 
-        # Increase contrast
-        from PIL import ImageEnhance
-        enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(2.0)
+        # Strategy 1: Digits-only OCR with aggressive preprocessing
+        img_digits = img.convert('L')
 
-        # Perform OCR with additional config
-        custom_config = r'--oem 3 --psm 6'
-        text = pytesseract.image_to_string(img, lang='deu+fra+ita', config=custom_config)
+        # Apply sharpening
+        img_digits = img_digits.filter(ImageFilter.SHARPEN)
+
+        # Increase contrast significantly for LED displays
+        enhancer = ImageEnhance.Contrast(img_digits)
+        img_digits = enhancer.enhance(3.0)
+
+        # Increase brightness
+        enhancer = ImageEnhance.Brightness(img_digits)
+        img_digits = enhancer.enhance(1.2)
+
+        # OCR with digits-only whitelist for LED displays
+        digits_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789.'
+        text_digits = pytesseract.image_to_string(img_digits, config=digits_config)
+
+        # Strategy 2: Standard OCR with moderate preprocessing (fallback)
+        img_standard = img.convert('L')
+        enhancer = ImageEnhance.Contrast(img_standard)
+        img_standard = enhancer.enhance(2.0)
+        standard_config = r'--oem 3 --psm 6'
+        text_standard = pytesseract.image_to_string(img_standard, lang='deu+fra+ita', config=standard_config)
+
+        # Use digits-only result if it found more numbers, otherwise use standard
+        text = text_digits if len(text_digits.strip()) > len(text_standard.strip()) else text_standard
+        print(f"Digits-only OCR: {text_digits}")
+        print(f"Standard OCR: {text_standard}")
+        print(f"Selected: {'digits' if text == text_digits else 'standard'}")
 
         # Extract prices
         prices = extract_prices(text)
@@ -137,13 +159,17 @@ def extract_prices(text: str) -> List[PriceData]:
     # Normalize text
     text = text.replace(',', '.')
 
+    # Remove whitespace and newlines for cleaner processing
+    text_cleaned = ' '.join(text.split())
+
     # Log OCR text for debugging
     print(f"OCR Text: {text}")
+    print(f"Cleaned: {text_cleaned}")
 
     # Extract all price-like numbers (format: X.XX or X.XXX or just X.X)
-    # Matches: 1.72, 1.80, 1.723, etc.
-    price_pattern = r'\b(\d{1,2}\.\d{1,3})\b'
-    found_prices = re.findall(price_pattern, text)
+    # Matches: 1.72, 1.80, 1.723, 1.86, etc.
+    price_pattern = r'(\d{1,2}\.\d{1,3})'
+    found_prices = re.findall(price_pattern, text_cleaned)
     print(f"Found prices: {found_prices}")
 
     # Convert to floats and validate range
