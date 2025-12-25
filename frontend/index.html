@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="TCS Benzinpreis OCR - Preise erfassen per Foto">
+    <meta name="theme-color" content="#003366">
+    <title>TCS Benzinpreis Scanner</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>Benzinpreis Scanner</h1>
+        </header>
+
+        <main>
+            <div id="camera-section">
+                <video id="camera" autoplay playsinline></video>
+                <canvas id="canvas" style="display: none;"></canvas>
+
+                <div id="controls">
+                    <button id="start-camera" class="btn btn-primary">Kamera starten</button>
+                    <button id="capture" class="btn btn-success" style="display: none;">Foto aufnehmen</button>
+                </div>
+            </div>
+
+            <div id="preview-section" style="display: none;">
+                <h2>Aufgenommenes Foto</h2>
+                <img id="preview" alt="Preview">
+                <div id="location-info"></div>
+
+                <div id="preview-controls">
+                    <button id="upload" class="btn btn-primary">An OCR senden</button>
+                    <button id="retake" class="btn btn-secondary">Neu aufnehmen</button>
+                </div>
+            </div>
+
+            <div id="result-section" style="display: none;">
+                <h2>Erkannte Preise</h2>
+                <div id="results"></div>
+                <button id="new-scan" class="btn btn-primary">Neuer Scan</button>
+            </div>
+
+            <div id="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Preise werden erkannt...</p>
+            </div>
+        </main>
+
+        <footer>
+            <p>TCS Benzinpreis OCR App</p>
+        </footer>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+</body>
+</html>
