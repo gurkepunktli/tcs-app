@@ -1,14 +1,14 @@
 FROM python:3.11-slim
 
-# Install system dependencies for Tesseract OCR and Chrome
+# Install system dependencies for Tesseract OCR and Playwright
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-deu \
     tesseract-ocr-fra \
     tesseract-ocr-ita \
     libtesseract-dev \
-    chromium \
-    chromium-driver \
+    wget \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -19,6 +19,9 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browsers (Chromium)
+RUN playwright install --with-deps chromium
 
 # Copy application code
 COPY app/ /app/

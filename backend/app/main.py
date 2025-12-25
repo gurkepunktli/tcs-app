@@ -89,7 +89,8 @@ async def process_image(
                 }
 
                 try:
-                    submission_success = submit_to_tcs(
+                    # Run async submit_to_tcs function
+                    submission_success = await submit_to_tcs(
                         latitude=latitude,
                         longitude=longitude,
                         prices=prices_dict,

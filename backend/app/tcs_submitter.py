@@ -1,22 +1,20 @@
 """
 TCS Benzin Website Submitter
-Logs into benzin.tcs.ch and submits fuel prices via Chrome Headless
+Uses browser-use AI agent to automate price submission on benzin.tcs.ch
 """
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 import os
-import time
+import json
+import asyncio
 from typing import Optional, Dict
+from langchain_openai import ChatOpenAI
+from browser_use import Agent, Browser, BrowserConfig
+from playwright.async_api import async_playwright
 
 
 class TCSSubmitter:
     def __init__(self, cookies: Optional[Dict] = None, username: str = None, password: str = None, headless: bool = True):
         """
-        Initialize TCS Submitter
+        Initialize TCS Submitter with browser-use AI agent
 
         Args:
             cookies: Dict of cookies to inject (e.g., {'session': 'abc123', 'auth_token': 'xyz'})
@@ -28,80 +26,105 @@ class TCSSubmitter:
         self.username = username
         self.password = password
         self.headless = headless
-        self.driver = None
+        self.browser = None
+        self.context = None
+        self.page = None
 
-    def _init_driver(self):
-        """Initialize Chrome WebDriver"""
-        chrome_options = Options()
+        # Get OpenRouter API key from environment
+        api_key = os.getenv('OPENROUTER_API_KEY')
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY environment variable not set")
 
-        if self.headless:
-            chrome_options.add_argument('--headless')
+        # Get model choice from environment (default to Claude 3.5 Sonnet)
+        model_name = os.getenv('LLM_MODEL', 'anthropic/claude-3.5-sonnet')
 
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
+        # Initialize LLM with OpenRouter
+        self.llm = ChatOpenAI(
+            model=model_name,
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
 
-        # Allow geolocation override
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_experimental_option("prefs", {
-            "profile.default_content_setting_values.geolocation": 1
-        })
+    async def _init_browser(self):
+        """Initialize Playwright browser"""
+        playwright = await async_playwright().start()
 
-        # Use chromium-driver from system
-        service = Service('/usr/bin/chromedriver')
+        browser_config = BrowserConfig(
+            headless=self.headless,
+            disable_security=False,
+        )
 
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.driver.implicitly_wait(10)
+        self.browser = await playwright.chromium.launch(
+            headless=self.headless,
+            args=[
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+            ]
+        )
 
-    def _set_geolocation(self, latitude: float, longitude: float, accuracy: float = 100):
-        """Override browser geolocation via Chrome DevTools Protocol"""
-        self.driver.execute_cdp_cmd("Emulation.setGeolocationOverride", {
-            "latitude": latitude,
-            "longitude": longitude,
-            "accuracy": accuracy
-        })
+        # Create context with permissions for geolocation
+        self.context = await self.browser.new_context(
+            permissions=['geolocation'],
+            viewport={'width': 1920, 'height': 1080}
+        )
 
-    def _inject_cookies(self):
+        self.page = await self.context.new_page()
+
+    async def _inject_cookies(self):
         """Inject cookies into the browser session"""
         if not self.cookies:
             return
 
         # Navigate to domain first
-        self.driver.get('https://benzin.tcs.ch')
-        time.sleep(1)
+        await self.page.goto('https://benzin.tcs.ch')
+        await asyncio.sleep(1)
 
-        # Add each cookie
+        # Convert cookies to Playwright format
+        playwright_cookies = []
         for name, value in self.cookies.items():
             cookie_dict = {
                 'name': name,
                 'value': value,
-                'domain': '.tcs.ch',  # Allow for subdomains
+                'domain': '.tcs.ch',
+                'path': '/',
             }
-            try:
-                self.driver.add_cookie(cookie_dict)
-                print(f"Injected cookie: {name}")
-            except Exception as e:
-                print(f"Failed to inject cookie {name}: {e}")
+            playwright_cookies.append(cookie_dict)
+
+        try:
+            await self.context.add_cookies(playwright_cookies)
+            print(f"Injected {len(playwright_cookies)} cookies")
+        except Exception as e:
+            print(f"Failed to inject cookies: {e}")
 
         # Refresh to apply cookies
-        self.driver.refresh()
-        time.sleep(1)
+        await self.page.reload()
+        await asyncio.sleep(1)
 
-    def login(self) -> bool:
+    async def _set_geolocation(self, latitude: float, longitude: float, accuracy: float = 100):
+        """Override browser geolocation"""
+        await self.context.set_geolocation({
+            "latitude": latitude,
+            "longitude": longitude,
+            "accuracy": accuracy
+        })
+        await self.context.grant_permissions(['geolocation'])
+        print(f"Set geolocation to: {latitude}, {longitude}")
+
+    async def login(self) -> bool:
         """
         Login to benzin.tcs.ch
         If cookies are provided, inject them instead of logging in
         Returns True if successful, False otherwise
         """
         try:
-            if not self.driver:
-                self._init_driver()
+            if not self.browser:
+                await self._init_browser()
 
             # If cookies are provided, use them instead of login
             if self.cookies:
                 print("Using provided cookies for authentication")
-                self._inject_cookies()
+                await self._inject_cookies()
                 return True
 
             # Otherwise, perform traditional login
@@ -110,12 +133,11 @@ class TCSSubmitter:
                 return False
 
             # Navigate to login page
-            self.driver.get('https://benzin.tcs.ch')
-            time.sleep(2)
+            await self.page.goto('https://benzin.tcs.ch')
+            await asyncio.sleep(2)
 
             # TODO: Implement actual login steps if needed
             # Currently not needed if using cookies
-
             print(f"[STUB] Would login with user: {self.username}")
             print("NOTE: Traditional login not implemented - provide cookies instead")
             return False
@@ -126,7 +148,7 @@ class TCSSubmitter:
             traceback.print_exc()
             return False
 
-    def submit_prices(
+    async def submit_prices(
         self,
         latitude: float,
         longitude: float,
@@ -135,7 +157,7 @@ class TCSSubmitter:
         diesel: Optional[float] = None
     ) -> bool:
         """
-        Submit fuel prices to TCS website
+        Submit fuel prices to TCS website using AI agent
 
         Args:
             latitude: GPS latitude
@@ -148,61 +170,67 @@ class TCSSubmitter:
             True if submission successful, False otherwise
         """
         try:
-            if not self.driver:
+            if not self.browser:
                 # Login first if not already done
-                if not self.login():
+                if not await self.login():
                     return False
 
             # Set geolocation to provided coordinates
             print(f"Setting GPS location to: {latitude}, {longitude}")
-            self._set_geolocation(latitude, longitude)
-
-            # TODO: Analyze benzin.tcs.ch to find the actual selectors
-            # Below is a TEMPLATE structure that needs to be filled with real selectors
+            await self._set_geolocation(latitude, longitude)
 
             # Navigate to the main page
-            self.driver.get('https://benzin.tcs.ch')
-            time.sleep(2)
+            await self.page.goto('https://benzin.tcs.ch')
+            await asyncio.sleep(3)
 
-            # TODO: Find the "Add Price" or "Preis melden" button
-            # Example:
-            # add_price_btn = WebDriverWait(self.driver, 10).until(
-            #     EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="add-price-button"]'))
-            # )
-            # add_price_btn.click()
+            # Build task description for AI agent
+            price_updates = []
+            if benzin_95:
+                price_updates.append(f"Benzin 95 to {benzin_95} CHF")
+            if benzin_98:
+                price_updates.append(f"Benzin 98 to {benzin_98} CHF")
+            if diesel:
+                price_updates.append(f"Diesel to {diesel} CHF")
 
-            # TODO: Wait for location/station selection
-            # The site might use GPS to find nearby stations
-            # Then user selects a station from a list or map
+            if not price_updates:
+                print("No prices to update")
+                return False
 
-            # TODO: Fill in price fields
-            # if benzin_95:
-            #     benzin95_input = WebDriverWait(self.driver, 10).until(
-            #         EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="benzin95"]'))
-            #     )
-            #     benzin95_input.clear()
-            #     benzin95_input.send_keys(str(benzin_95))
+            price_text = ", ".join(price_updates)
 
-            # if benzin_98:
-            #     benzin98_input = self.driver.find_element(By.CSS_SELECTOR, 'input[name="benzin98"]')
-            #     benzin98_input.clear()
-            #     benzin98_input.send_keys(str(benzin_98))
+            task = f"""
+            You are on the benzin.tcs.ch website. The browser's GPS location is already set to coordinates {latitude}, {longitude}.
 
-            # if diesel:
-            #     diesel_input = self.driver.find_element(By.CSS_SELECTOR, 'input[name="diesel"]')
-            #     diesel_input.clear()
-            #     diesel_input.send_keys(str(diesel))
+            Your task:
+            1. Find and click on the nearest gas station on the map (it should appear based on the GPS location)
+            2. For this gas station, update the following fuel prices: {price_text}
+            3. Click the "AKTUALISIEREN" (update) button for each fuel type
+            4. Enter the new price in the dialog that appears
+            5. Confirm/save the price update
+            6. Repeat for all fuel types that need updating
 
-            # TODO: Submit the form
-            # submit_btn = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-            # submit_btn.click()
+            Important notes:
+            - The website is in German/French
+            - Look for "AKTUALISIEREN" buttons next to each fuel type
+            - The map should show nearby stations based on GPS
+            - Click on the first/nearest station marker on the map
+            - Be careful to update the correct fuel types with the correct prices
+            """
 
-            # Wait for confirmation
-            # time.sleep(2)
+            print(f"Starting AI agent to submit prices: {price_text}")
+            print(f"Location: {latitude}, {longitude}")
 
-            print(f"[STUB] Would submit prices: B95={benzin_95}, B98={benzin_98}, D={diesel}")
-            print(f"[STUB] Location: {latitude}, {longitude}")
-            print("NOTE: Actual submission is not implemented - needs real selectors from benzin.tcs.ch")
+            # Create browser-use agent
+            agent = Agent(
+                task=task,
+                llm=self.llm,
+                browser=Browser(config=BrowserConfig(headless=self.headless))
+            )
+
+            # Run the agent with existing page
+            result = await agent.run(start_url='https://benzin.tcs.ch')
+
+            print(f"AI agent completed with result: {result}")
 
             return True
 
@@ -212,22 +240,28 @@ class TCSSubmitter:
             traceback.print_exc()
             return False
 
-    def close(self):
+    async def close(self):
         """Close the browser"""
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
+        if self.page:
+            await self.page.close()
+        if self.context:
+            await self.context.close()
+        if self.browser:
+            await self.browser.close()
+        self.browser = None
+        self.context = None
+        self.page = None
 
-    def __enter__(self):
-        """Context manager entry"""
+    async def __aenter__(self):
+        """Async context manager entry"""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit"""
-        self.close()
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        await self.close()
 
 
-def submit_to_tcs(
+async def submit_to_tcs(
     latitude: float,
     longitude: float,
     prices: Dict[str, float],
@@ -249,8 +283,8 @@ def submit_to_tcs(
     Returns:
         True if successful, False otherwise
     """
-    with TCSSubmitter(cookies=cookies, username=username, password=password) as submitter:
-        return submitter.submit_prices(
+    async with TCSSubmitter(cookies=cookies, username=username, password=password) as submitter:
+        return await submitter.submit_prices(
             latitude=latitude,
             longitude=longitude,
             benzin_95=prices.get('benzin_95'),
