@@ -6,8 +6,6 @@ services:
     container_name: tcs-ocr-api
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend/app:/app
     environment:
       - TCS_COOKIES=${TCS_COOKIES}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
