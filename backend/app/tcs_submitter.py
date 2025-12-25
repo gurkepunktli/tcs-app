@@ -6,7 +6,8 @@ import os
 import json
 import asyncio
 from typing import Optional, Dict
-from browser_use import Agent, BrowserSession, ChatOpenAI
+from browser_use import Agent, BrowserSession
+from langchain_community.chat_models import ChatOpenAI
 from playwright.async_api import async_playwright
 
 
@@ -39,14 +40,19 @@ class TCSSubmitter:
         model_name = os.getenv('LLM_MODEL', 'google/gemini-2.0-flash-exp:free')
 
         # Initialize LLM with OpenRouter for browser-use compatibility
-        # Use browser_use.ChatOpenAI which wraps langchain properly
+        # Use langchain_community.ChatOpenAI as per browser-use issue #567
         self.llm = ChatOpenAI(
-            base_url='https://openrouter.ai/api/v1',
-            api_key=api_key,
             model=model_name,
-            default_headers={
-                'HTTP-Referer': 'https://github.com/gurkepunktli/tcs-app',
-                'X-Title': 'TCS Benzin Price Submitter'
+            openai_api_key=api_key,
+            openai_api_base='https://openrouter.ai/api/v1',
+            temperature=0.0,
+            max_tokens=4096,
+            model_kwargs={
+                "tool_choice": "auto",
+                "extra_headers": {
+                    'HTTP-Referer': 'https://github.com/gurkepunktli/tcs-app',
+                    'X-Title': 'TCS Benzin Price Submitter'
+                }
             }
         )
 
