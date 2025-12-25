@@ -57,15 +57,15 @@ async def process_image(
         contents = await image.read()
         img = Image.open(io.BytesIO(contents))
 
-        # Try PaddleOCR first (best for LED displays, fast and local)
+        # Try Vision API first (Llama 3.2 Vision via OpenRouter)
         prices = []
         text = ""
 
         try:
-            prices, text = paddleocr_extract_prices(contents)
-            print(f"PaddleOCR extraction successful: {prices}")
-        except Exception as paddle_error:
-            print(f"PaddleOCR failed: {paddle_error}, falling back to Tesseract")
+            prices, text = await vision_extract_prices(contents)
+            print(f"Vision API extraction successful: {prices}")
+        except Exception as vision_error:
+            print(f"Vision API failed: {vision_error}, falling back to Tesseract")
 
             # Fallback to Tesseract OCR
             from PIL import ImageEnhance, ImageFilter
@@ -147,115 +147,112 @@ async def process_image(
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
 
-# Global PaddleOCR instance (initialized once to avoid reloading models)
-_paddle_ocr = None
-
-def get_paddle_ocr():
-    """Lazy load PaddleOCR instance (singleton pattern)"""
-    global _paddle_ocr
-    if _paddle_ocr is None:
-        from paddleocr import PaddleOCR
-        # Initialize with English model, CPU mode, disable angle classification for speed
-        _paddle_ocr = PaddleOCR(
-            use_angle_cls=False,
-            lang='en',
-            use_gpu=False,
-            show_log=False
-        )
-    return _paddle_ocr
-
-
-def paddleocr_extract_prices(image_bytes: bytes) -> tuple[List[PriceData], str]:
+async def vision_extract_prices(image_bytes: bytes) -> tuple[List[PriceData], str]:
     """
-    Use PaddleOCR to extract fuel prices from LED displays.
+    Use Llama 3.2 Vision via OpenRouter to extract fuel prices from LED displays.
     Returns (prices, raw_text) tuple.
     """
-    import numpy as np
-    import cv2
+    api_key = os.getenv('OPENROUTER_API_KEY')
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not set")
 
-    # Load image with OpenCV
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    # Convert image to base64
+    image_b64 = base64.b64encode(image_bytes).decode('utf-8')
 
-    # Get PaddleOCR instance
-    ocr = get_paddle_ocr()
+    # Determine image format
+    img = Image.open(io.BytesIO(image_bytes))
+    img_format = img.format.lower() if img.format else 'jpeg'
+    if img_format == 'jpg':
+        img_format = 'jpeg'
 
-    # Perform OCR
-    results = ocr.ocr(img, cls=False)
+    # Prepare Vision API request with Llama 3.2 Vision
+    prompt = """Analysiere dieses Bild einer Tankstellen-Preisanzeige.
 
-    if not results or not results[0]:
-        raise ValueError("PaddleOCR found no text")
+Extrahiere ALLE sichtbaren Benzinpreise in CHF. Die Preise sind auf LED-Displays angezeigt.
 
-    # Extract detected text and bounding boxes
-    detected_texts = []
-    for line in results[0]:
-        bbox, (text, confidence) = line
-        # Only keep detections with digits
-        if any(c.isdigit() for c in text) and confidence > 0.5:
-            detected_texts.append((text, bbox, confidence))
-            print(f"PaddleOCR detected: '{text}' (confidence: {confidence:.2f})")
+WICHTIG:
+- Gib die Preise in der Reihenfolge von oben nach unten an
+- Format: Nur die Zahlen, z.B. "1.86" (mit Punkt, nicht Komma)
+- Wenn 3 Preise sichtbar sind: 1. Benzin 95, 2. Benzin 98, 3. Diesel
+- Wenn 2 Preise sichtbar sind: 1. Benzin 95, 2. Diesel
 
-    # Combine all detected text
-    raw_text = ' '.join([text for text, _, _ in detected_texts])
+Antworte NUR mit den Preisen in folgender JSON-Struktur:
+{
+  "prices": ["1.86", "1.96", "1.95"]
+}
 
-    # Filter to only digits and dots
-    filtered_texts = []
-    for text, bbox, conf in detected_texts:
-        # Remove non-digit characters except dots
-        cleaned = ''.join(c for c in text if c.isdigit() or c == '.')
-        if cleaned:
-            filtered_texts.append((cleaned, bbox, conf))
+Keine weiteren Erklärungen, nur das JSON."""
 
-    # Extract price-like patterns
-    price_pattern = r'(\d{1,2}\.\d{1,3})'
-    prices_with_pos = []
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "meta-llama/llama-3.2-11b-vision-instruct:free",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/{img_format};base64,{image_b64}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        )
 
-    for text, bbox, conf in filtered_texts:
-        for price_str in re.findall(price_pattern, text):
-            try:
-                price = float(price_str)
-                if 1.0 <= price <= 3.0:  # Reasonable CHF price range
-                    # Calculate vertical center of bounding box
-                    y_coords = [point[1] for point in bbox]
-                    y_center = sum(y_coords) / len(y_coords)
-                    prices_with_pos.append((price, y_center))
-                    print(f"Valid price found: {price} at Y={y_center}")
-            except (ValueError, IndexError):
-                continue
+        if response.status_code != 200:
+            raise ValueError(f"Vision API error: {response.status_code} - {response.text}")
 
-    # Sort by Y position (top to bottom)
-    prices_with_pos.sort(key=lambda x: x[1])
-    sorted_prices = [price for price, _ in prices_with_pos]
+        result = response.json()
+        raw_text = result['choices'][0]['message']['content']
+        print(f"Vision API raw response: {raw_text}")
 
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_prices = []
-    for p in sorted_prices:
-        if p not in seen:
-            seen.add(p)
-            unique_prices.append(p)
+        # Parse JSON response
+        try:
+            # Extract JSON from response (handle potential markdown formatting)
+            json_str = raw_text
+            if '```json' in raw_text:
+                json_str = raw_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in raw_text:
+                json_str = raw_text.split('```')[1].split('```')[0].strip()
 
-    # Map prices based on position
-    prices = []
-    if len(unique_prices) == 3:
-        prices = [
-            PriceData(type='Benzin 95', value=unique_prices[0]),
-            PriceData(type='Benzin 98', value=unique_prices[1]),
-            PriceData(type='Diesel', value=unique_prices[2])
-        ]
-    elif len(unique_prices) == 2:
-        prices = [
-            PriceData(type='Benzin 95', value=unique_prices[0]),
-            PriceData(type='Diesel', value=unique_prices[1])
-        ]
-    elif len(unique_prices) == 1:
-        prices = [
-            PriceData(type='Benzin 95', value=unique_prices[0])
-        ]
-    else:
-        raise ValueError(f"Could not extract valid prices. Found: {unique_prices}")
+            data = json.loads(json_str)
+            price_values = data.get('prices', [])
 
-    return prices, raw_text
+            # Convert to PriceData objects based on position
+            prices = []
+            if len(price_values) == 3:
+                prices = [
+                    PriceData(type='Benzin 95', value=float(price_values[0])),
+                    PriceData(type='Benzin 98', value=float(price_values[1])),
+                    PriceData(type='Diesel', value=float(price_values[2]))
+                ]
+            elif len(price_values) == 2:
+                prices = [
+                    PriceData(type='Benzin 95', value=float(price_values[0])),
+                    PriceData(type='Diesel', value=float(price_values[1]))
+                ]
+            elif len(price_values) == 1:
+                prices = [
+                    PriceData(type='Benzin 95', value=float(price_values[0]))
+                ]
+
+            return prices, raw_text
+
+        except (json.JSONDecodeError, KeyError, ValueError, IndexError) as e:
+            raise ValueError(f"Failed to parse Vision API response: {e}")
 
 
 def extract_prices(text: str) -> List[PriceData]:
