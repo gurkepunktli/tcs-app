@@ -6,8 +6,7 @@ import os
 import json
 import asyncio
 from typing import Optional, Dict
-from browser_use import Agent, BrowserSession
-from langchain_openai import ChatOpenAI
+from browser_use import Agent, BrowserSession, ChatOpenAI
 from playwright.async_api import async_playwright
 
 
@@ -40,14 +39,11 @@ class TCSSubmitter:
         model_name = os.getenv('LLM_MODEL', 'anthropic/claude-3.5-sonnet')
 
         # Initialize LLM with OpenRouter for browser-use compatibility
-        # Use langchain_openai.ChatOpenAI with OpenRouter endpoint
+        # Use browser_use.ChatOpenAI which wraps langchain properly
         self.llm = ChatOpenAI(
-            openai_api_base='https://openrouter.ai/api/v1',
-            openai_api_key=api_key,
-            model_name=model_name,
-            temperature=0.0,
-            max_tokens=4096,
-            model_kwargs={"tool_choice": "auto"}
+            base_url='https://openrouter.ai/api/v1',
+            api_key=api_key,
+            model=model_name
         )
 
     async def _init_browser(self):
