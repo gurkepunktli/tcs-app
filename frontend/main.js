@@ -23,6 +23,8 @@ const newScanBtn = document.getElementById('new-scan');
 let stream = null;
 let capturedImage = null;
 let coordinates = null;
+let gpsWatchId = null;
+let bestAccuracy = Infinity;
 
 // Event Listeners
 startCameraBtn.addEventListener('click', startCamera);
@@ -55,28 +57,45 @@ async function startCamera() {
     }
 }
 
-// Get GPS location with improved accuracy
+// Get GPS location with continuous improvement
 function getLocation() {
     if ('geolocation' in navigator) {
-        console.log('Requesting high-accuracy GPS location...');
+        console.log('Starting continuous GPS tracking for best accuracy...');
 
-        navigator.geolocation.getCurrentPosition(
+        const accuracyWarning = document.getElementById('accuracy-warning');
+        bestAccuracy = Infinity;
+
+        // Use watchPosition for continuous updates
+        gpsWatchId = navigator.geolocation.watchPosition(
             (position) => {
-                coordinates = {
-                    latitude: position.coords.latitude,
-                    longitude: position.coords.longitude,
-                    accuracy: position.coords.accuracy
-                };
-                console.log('Standort erfasst:', coordinates);
+                const currentAccuracy = position.coords.accuracy;
 
-                // Show accuracy warning in UI if needed
-                const accuracyWarning = document.getElementById('accuracy-warning');
-                if (accuracyWarning) {
-                    if (coordinates.accuracy > 20) {
-                        accuracyWarning.textContent = `⚠️ GPS-Genauigkeit: ±${Math.round(coordinates.accuracy)}m (sollte ≤20m sein)`;
-                        accuracyWarning.style.display = 'block';
-                    } else {
-                        accuracyWarning.style.display = 'none';
+                // Update if this is better accuracy OR first reading
+                if (currentAccuracy < bestAccuracy || !coordinates) {
+                    bestAccuracy = currentAccuracy;
+                    coordinates = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: currentAccuracy
+                    };
+
+                    console.log(`GPS Update - Accuracy: ${Math.round(currentAccuracy)}m (best: ${Math.round(bestAccuracy)}m)`);
+
+                    // Update UI with current accuracy
+                    if (accuracyWarning) {
+                        if (currentAccuracy <= 20) {
+                            accuracyWarning.textContent = `✓ GPS-Genauigkeit: ±${Math.round(currentAccuracy)}m (sehr gut)`;
+                            accuracyWarning.className = 'warning-box success-box';
+                            accuracyWarning.style.display = 'block';
+                        } else if (currentAccuracy <= 50) {
+                            accuracyWarning.textContent = `GPS-Genauigkeit: ±${Math.round(currentAccuracy)}m (akzeptabel, wird verbessert...)`;
+                            accuracyWarning.className = 'warning-box info-box';
+                            accuracyWarning.style.display = 'block';
+                        } else {
+                            accuracyWarning.textContent = `⚠️ GPS-Genauigkeit: ±${Math.round(currentAccuracy)}m (ungenau, bitte draußen gehen...)`;
+                            accuracyWarning.className = 'warning-box warning-box';
+                            accuracyWarning.style.display = 'block';
+                        }
                     }
                 }
             },
@@ -96,17 +115,30 @@ function getLocation() {
                         break;
                 }
 
-                alert(errorMessage);
+                if (accuracyWarning) {
+                    accuracyWarning.textContent = `❌ ${errorMessage}`;
+                    accuracyWarning.className = 'warning-box error-box';
+                    accuracyWarning.style.display = 'block';
+                }
                 coordinates = null;
             },
             {
                 enableHighAccuracy: true,  // Force GPS usage instead of WiFi/IP
                 maximumAge: 0,             // Don't use cached position
-                timeout: 30000             // Increased timeout to 30 seconds for GPS lock
+                timeout: 30000             // Timeout for each update
             }
         );
     } else {
         alert('Geolocation wird von diesem Browser nicht unterstützt.');
+    }
+}
+
+// Stop GPS tracking
+function stopGPSTracking() {
+    if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+        console.log('GPS tracking stopped');
     }
 }
 
@@ -147,6 +179,9 @@ function stopCamera() {
         stream = null;
     }
     video.classList.remove('active');
+
+    // Stop GPS tracking when camera is stopped
+    stopGPSTracking();
 }
 
 // Upload photo to backend
