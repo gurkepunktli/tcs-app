@@ -5,7 +5,7 @@ services:
     build: ./backend
     container_name: tcs-ocr-api
     ports:
-      - "8000:8000"
+      - "8010:8000"
     environment:
       - TCS_COOKIES=${TCS_COOKIES}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -16,9 +16,9 @@ services:
       - TCS_USERNAME=${TCS_USERNAME:-}
       - TCS_PASSWORD=${TCS_PASSWORD:-}
     networks:
-      - fiber.x_net
+      - cloudflare_net
     restart: unless-stopped
 
 networks:
-  fiber.x_net:
+  cloudflare_net:
     external: true
