@@ -8,6 +8,7 @@ python-dotenv
 playwright
 langchain-openai
 browser-use
+paddlepaddle==2.6.0
 paddleocr==2.7.3
 httpx
 numpy
