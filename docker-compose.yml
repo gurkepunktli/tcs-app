@@ -16,9 +16,12 @@ services:
       - TCS_USERNAME=${TCS_USERNAME:-}
       - TCS_PASSWORD=${TCS_PASSWORD:-}
     networks:
+      - fiber.x_net
       - cloudflare_net
     restart: unless-stopped
 
 networks:
+  fiber.x_net:
+    external: true
   cloudflare_net:
     external: true
