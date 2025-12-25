@@ -191,7 +191,7 @@ Keine weiteren Erklärungen, nur das JSON."""
                 "Content-Type": "application/json"
             },
             json={
-                "model": "google/gemini-2.0-flash-exp:free",
+                "model": "google/gemini-flash-1.5",
                 "messages": [
                     {
                         "role": "user",
